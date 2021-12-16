@@ -51,7 +51,7 @@ After being loaded into the processes, it detects if log4j is loaded and tries t
 2. Patch the vulnerable function.  
   
 **Usage**  
-Full instructions on building and running the tool is found in the [repository itself](https://github.com/SentineLabs/hotpatch-for-apache-log4j2/tree/217a195c081d1a423004569b08a7b7f16bdb1acc).  
+Full instructions on building and running the tool is found in the [repository itself](https://github.com/SentineLabs/hotpatch-for-apache-log4j2).  
 
 
 
