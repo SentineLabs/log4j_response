@@ -1,0 +1,3 @@
+[submodule "dynamic/hotpatch"]
+	path = dynamic/hotpatch
+	url = https://github.com/SentineLabs/hotpatch-for-apache-log4j2
