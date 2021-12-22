@@ -10,9 +10,9 @@ import zipfile
 ## Globals.
 
 #
-# Global set of log4j signatures of modules that have the vulnerability.
+# Global sets of log4j signatures of modules that have the vulnerability.
 #
-g_log4j_signatures = [
+g_log4j_signatures_cve_2021_44228 = [
     "678861ba1b2e1fccb594bb0ca03114bb05da9695",
     "7621fe28ce0122d96006bdb56c8e2cfb2a3afb92",
     "4363cdf913a584fe8fa72cf4c0eaae181ef7d1eb",
@@ -47,10 +47,21 @@ g_log4j_signatures = [
     "94bc1813a537b3b5c04f9b4adead3c434f364a70",
     "c476bd8acb6e7e55f14195a88fa8802687fcf542",
     "e7dc681a6da4f2f203dccd1068a1ea090f67a057",
-    # Hash for 2.14.1
-    "9141212b8507ab50a45525b545b39d224614528b",
     # Hash for 2.6.2
-    "00a91369f655eb1639c6aece5c5eb5108db18306"
+    "00a91369f655eb1639c6aece5c5eb5108db18306",
+    # Hash for 2.14.1
+    "9141212b8507ab50a45525b545b39d224614528b"
+]
+
+g_log4j_signatures_cve_2021_45046 = [
+    # Hash for 2.15.0
+    "9bd89149d5083a2a3ab64dcc88b0227da14152ec",
+    "ba55c13d7ac2fd44df9cc8074455719a33f375b9"
+]
+g_log4j_signatures_cve_2021_45105 = [
+    # Hash for 2.16.0
+    "539a445388aee52108700f26d9644989e7916e7c",
+    "ca12fb3902ecfcba1e1357ebfc55407acec30ede"
 ]
 
 #
@@ -97,8 +108,8 @@ g_search_binaries = False
 #
 # Global pre-compiled regex to search for the log4j string
 #
-g_regex_compiled_bytes = re.compile(b'log4j-core-2\\.([0-9]|1[0-4])(\\.[0-9]+)?(-beta9*)?\\.jar')
-g_regex_compiled_str = re.compile('log4j-core-2\\.([0-9]|1[0-4])(\\.[0-9]+)?(-beta9*)?\\.jar')
+g_regex_compiled_bytes = re.compile(b'log4j-core-2\\.([0-9]|1[0-6])(\\.[0-9]+)?(-beta9*)?\\.jar')
+g_regex_compiled_str = re.compile('log4j-core-2\\.([0-9]|1[0-6])(\\.[0-9]+)?(-beta9*)?\\.jar')
 
 ################################################################################
 
@@ -115,11 +126,11 @@ def write_log_output(s):
 # detection_method - this can be "name_match", "signature_match", or "deep_search"
 # signature - this is only valid for "signature_match", and otherwise is "".
 #
-def capture_result_for_output(file_path, detection_method, signature):
+def capture_result_for_output(file_path, detection_method, signature, cve_ids, potentially=False):
     if file_path in g_results_map:
         write_log_output("(capture_result_for_output) already exists: {}".format(file_path + detection_method + signature))
         return
-    g_results_map[file_path] = {'method': detection_method, 'sha1': signature}
+    g_results_map[file_path] = {'method': detection_method, 'sha1': signature, 'cve_ids': cve_ids, 'potentially': potentially}
 
 #
 # Filters key JSON characters
@@ -137,7 +148,10 @@ def print_captured_results():
     # Generate json manually as to maintain support for Python 2.5
     found = []
     for k, v in g_results_map.items():
-        found.append("{{\"file_path\":\"{}\",\"method\":\"{}\",\"sha1\":\"{}\"}}".format(filter_json_str(k), filter_json_str(v['method']), filter_json_str(v['sha1'])))
+        cve_info = "This was found as potentially vulnerable to {}.".format(", ".join(v['cve_ids']))
+        if v['potentially']:
+            cve_info = "{} It was unable to differentiate between 2.15.0 and 2.16.0.".format(cve_info)
+        found.append("{{\"file_path\":\"{}\",\"method\":\"{}\",\"sha1\":\"{}\",\"info\":\"{}\"}}".format(filter_json_str(k), filter_json_str(v['method']), filter_json_str(v['sha1']), cve_info))
     errors = ",".join(['"' + filter_json_str(i) + '"' for i in g_errors_arr])
     final_json = "{{\"MachineName\":\"{}\",\"OS_Version\":\"{}\",\"Found\":[{}],\"Errors\":[{}]}}".format(filter_json_str(machine_name), filter_json_str(os_version), ",".join(found), errors)
     print(final_json)
@@ -176,15 +190,20 @@ class TargetFile:
         self.sha1sum = sha1.hexdigest()
 
     #
-    # Checks whether the current signature exists in the vulnerable signatures
-    # map.
+    # Checks whether the current signature exists in the list of known
+    # vulnerable signatures
     #
-    def is_log4j_vuln_signature_match(self):
-        global g_log4j_signatures
-        return self.sha1sum in g_log4j_signatures
+    def log4j_vuln_signature_match(self):
+        if self.sha1sum in g_log4j_signatures_cve_2021_44228:
+            return ['CVE-2021-44228', 'CVE-2021-45046', 'CVE-2021-45105']
+        elif self.sha1sum in g_log4j_signatures_cve_2021_45046:
+            return ['CVE-2021-45046', 'CVE-2021-45105']
+        elif self.sha1sum in g_log4j_signatures_cve_2021_45105:
+            return ['CVE-2021-45105']
+        return []
 
     #
-    # Returns true if there exists a log4j-core version is between 2.0 and 2.14 inclusive.
+    # Returns true if there exists a log4j-core version is between 2.0 and 2.16 inclusive.
     #
     def search_name(self, search_string=None, found_through="name_match"):
         global g_regex_compiled_bytes
@@ -211,12 +230,15 @@ class TargetFile:
             if minor_ver < 0:
                 write_log_output("({}) unable to parse version: {}".format(found_through, match.group(1)))
                 return False
-            # versions from 2.0 to 2.14 are vulnerable.
-            if minor_ver > 14:
-                return False
-            # version is x.y, where 2.0 <= x.y <= 2.14.
-            self.get_sha1_of_file()
-            capture_result_for_output(self.file_path, found_through, self.sha1sum)
+            if minor_ver <= 14:
+                self.get_sha1_of_file()
+                capture_result_for_output(self.file_path, found_through, self.sha1sum, ['CVE-2021-44228', 'CVE-2021-45046', 'CVE-2021-45105'])
+            elif minor_ver == 15:
+                self.get_sha1_of_file()
+                capture_result_for_output(self.file_path, found_through, self.sha1sum, ['CVE-2021-45046', 'CVE-2021-45105'])
+            elif minor_ver == 16:
+                self.get_sha1_of_file()
+                capture_result_for_output(self.file_path, found_through, self.sha1sum, ['CVE-2021-45105'])
             return True
         except Exception as e:
             write_log_output("({}) unable to check name in file {}. Error: {}".format(found_through, self.file_path, str(e)))
@@ -236,8 +258,10 @@ class TargetFile:
             if self.file_size > g_hash_file_size * 1024 * 1024:
                 return False
             self.get_sha1_of_file()
-            if self.sha1sum and self.is_log4j_vuln_signature_match():
-                capture_result_for_output(self.file_path, "signature_match", self.sha1sum)
+            if self.sha1sum:
+                cve_ids = self.log4j_vuln_signature_match()
+                if len(cve_ids) > 0:
+                    capture_result_for_output(self.file_path, "signature_match", self.sha1sum, cve_ids)
                 return True
         except Exception as e:
             write_log_output("(find_by_hash) unable to check path: {}. Error: {}".format(self.file_path, str(e)))
@@ -260,16 +284,24 @@ class TargetFile:
     def search_file_contents(self, file_data):
         # 1) This is potentially a log4j file
         # 2) This is a log4j 2.x file
-        # 3) This is not a log4j 2.15+ file
-        # 4) Verify with additional classes that it is not a 2.15+ file
+        # 3) This is not a log4j 2.17+ file
+        # 4) Verify with additional classes that it is not a 2.17+ file
         if (b"log4j" in file_data
+            # log4j 2.x
             and b"AbstractSocketManager.class" in file_data
             and b"LogEventPatternConverter.class" in file_data
             and b"SystemPropertiesLookup.class" in file_data
-            and b"MarkerPatternConverter.class" in file_data
-            and b"BasicAsyncLoggerContextSelector.class" not in file_data):
+            and b"MarkerPatternConverter.class" in file_data):
             self.get_sha1_of_file()
-            capture_result_for_output(self.file_path, "deep_search", self.sha1sum)
+
+            # log4j 2.15/2.16+
+            if b"BasicAsyncLoggerContextSelector.class" in file_data:
+                # log4j 2.17+
+                if b"ConfigurationStrSubstitutor.class" in file_data:
+                    return False
+                capture_result_for_output(self.file_path, "deep_search", self.sha1sum, ['CVE-2021-45046', 'CVE-2021-45105'], potentially=True)
+                return True
+            capture_result_for_output(self.file_path, "deep_search", self.sha1sum, ['CVE-2021-44228', 'CVE-2021-45046', 'CVE-2021-45105'])
             return True
         return False
 
@@ -419,7 +451,7 @@ def parseargs():
 #
 def print_help():
     print("--disable-deep-search    - Disables deep search and resorts to using only hashes and filenames (Default: False)")
-    print("--deep-search-filesize=N - Sets the largest size of a file that this script will search in (Default: {})".format(g_default_ds_file_size))
+    print("--deep-search-filesize=N - Sets the largest size in megabytes of a file that this script will search in (Default: {})".format(g_default_ds_file_size))
     print("--search-binaries        - Sets whether the script will look in .jar files, or all files (Default: False)")
     print("--output-dir=XYZ         - Sets the output directory (Default: {})".format(g_default_output_dir))
 

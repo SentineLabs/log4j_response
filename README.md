@@ -9,7 +9,7 @@ The tool works by identifying files that are either vulnerable Log4J jars, or fi
 
 **Usage**\
 --disable-deep-search - Disables deep search and resorts to using only hashes and filenames (Default: False)\
---deep-search-filesize=N - Sets the largest size of a file that this script will search in (Default: 30)\
+--deep-search-filesize=N - Sets the largest size in megabytes of a file that this script will search in (Default: 30)\
 --search-binaries - Sets whether the script will look in .jar files, or all files (Default: False)\
 --output-dir=XYZ - Sets the output directory (Default: /tmp/)\
 
